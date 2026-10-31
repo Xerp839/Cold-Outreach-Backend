@@ -74,10 +74,10 @@ class Settings(BaseSettings):
     company_blocklist: CsvList = []
 
     # --- Pipeline limits (quality over quantity) ---
-    daily_draft_target: int = 10
+    daily_draft_target: int = 5  # what free Apollo + Hunter credits sustain over a month
     min_score: int = 70
     max_jobs_to_score: int = 40
-    max_contact_lookups: int = 20
+    max_contact_lookups: int = 8
     company_cooldown_days: int = 30
     job_freshness_days: int = 7
 

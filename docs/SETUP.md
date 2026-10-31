@@ -82,14 +82,18 @@ and switches to Groq for the rest of the day once the daily quota is hit.
 
 ## 5. Apollo (contacts, tried first)
 
-1. Sign up at [apollo.io](https://www.apollo.io) (free plan).
-2. **Settings** -> **Integrations** -> **API** -> **Create new key**. If it offers **Set as master key**, turn it on:
-   the people search endpoint requires it.
+1. Sign up at [apollo.io](https://www.apollo.io) (free plan). Apollo's docs say free accounts need a **work email**
+   for API search. Try your Gmail first; if search calls get rejected, the app just falls back to Hunter.
+   Avoid using your current employer's email - the account (and its credits) would be tied to that job.
+2. **Settings** -> **Integrations** -> **API** -> **Create new key**. If it offers **Set as master key**, turn it on.
 3. Copy -> `APOLLO_API_KEY`.
 
-The app uses two endpoints: people search (finds recruiters / HR / engineering managers at the company domain)
-and people match (reveals one person's email; this is what spends credits - at most 2 per company).
-If the free plan doesn't allow API access or credits run out, Apollo answers 401/403/429; the app marks Apollo
+The app uses two endpoints:
+- people search - finds recruiters / HR / engineering managers at the company domain. **0 credits.**
+- people match - reveals one person's email. **1 credit** when an email comes back. The free plan gets roughly
+  900-1200 credits a year, granted monthly (~75-100 a month).
+
+If the free plan blocks the API or credits run out, Apollo answers 401/403/429; the app marks Apollo
 **exhausted** for the day and moves on to Hunter. Nothing breaks - you'll see it on the dashboard's Providers page.
 
 ## 6. Hunter (contacts, fallback + email pattern)
@@ -98,7 +102,7 @@ If the free plan doesn't allow API access or credits run out, Apollo answers 401
 2. Dashboard -> **API** -> copy the key -> `HUNTER_API_KEY`.
 
 One domain search per company: it returns people with emails **and** the company's email pattern
-(e.g. `{first}.{last}`). The free plan only has a small number of searches per month, so they go fast. The
+(e.g. `{first}.{last}`). The free plan has 50 credits a month (a domain search costs 1), so they go fast. The
 Providers page shows used / available, read from Hunter's free `/account` endpoint.
 
 ## 7. Local `.env` and first run

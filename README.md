@@ -14,7 +14,7 @@ GitHub Actions cron (09:00 IST)
      6. draft      IMAP APPEND into Gmail Drafts (never sends)
 ```
 
-Quality over volume: at most `DAILY_DRAFT_TARGET` (10) drafts a day, only jobs scoring `MIN_SCORE` (70)+,
+Quality over volume: at most `DAILY_DRAFT_TARGET` (5) drafts a day, only jobs scoring `MIN_SCORE` (70)+,
 one job per company per run, no company twice within 30 days, no email address ever twice.
 Good-fit jobs without a findable contact show up in the dashboard under **Apply manually**.
 
