@@ -2,13 +2,12 @@
 
 import json
 
-from app import models  # noqa: F401
-from app.db import Base, engine, session_scope
+from app.db import init_db, session_scope
 from app.models import Run
 from app.pipeline.runner import run_pipeline, start_run
 
 if __name__ == "__main__":
-    Base.metadata.create_all(engine)
+    init_db()
     run_id = start_run("manual")
     if run_id is None:
         raise SystemExit("a run is already in progress")

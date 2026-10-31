@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db import session_scope
-from app.models import Draft, Job, JobStatus, Run
+from app.models import Draft, Job, JobStatus, LinkedInNote, Run
 from app.pipeline import runner
 from app.pipeline.fetch import RawJob
 from app.providers.finders import Apollo, Candidate, Hunter
@@ -30,6 +30,8 @@ class FakeProvider:
             score = 40 if "Data Analyst" in user else 85
             return {"score": score, "summary": "s", "fit_points": ["FastAPI -> built FastAPI agents"], "gaps": [],
                     "company_domain": "acme.in"}
+        if "connection-request notes" in system:
+            return {"note": "Saw the AI Engineer opening - I build LLM agents in production at Quantal. Would love to connect."}
         return {"subject": "AI Engineer role - LLM agents in prod", "body": "word " * 100}
 
 
@@ -57,7 +59,8 @@ class FakeFinder:
 def make_jobs():
     return [
         RawJob(source="naukri", url=f"https://n/{i}", title="AI Engineer", company=f"Company{i}",
-               location="Mumbai, India", description=DESC, jd_emails=[f"hr@company{i}.in"] if i % 2 == 0 else [])
+               location="Mumbai, India", description=DESC, jd_emails=[f"hr@company{i}.in"] if i % 2 == 0 else [],
+               company_linkedin_url="https://www.linkedin.com/company/company0" if i == 0 else None)
         for i in range(6)
     ] + [
         RawJob(source="naukri", url="https://n/sr", title="Senior AI Engineer", company="Big", location="Pune", description=DESC),
@@ -155,6 +158,24 @@ def test_jobs_wait_for_tomorrow_when_hunter_share_is_spent(wired, monkeypatch):
     assert waiting and p.stats["no_contact"] == 0  # queued, not dumped into "apply manually"
 
 
+def test_linkedin_notes_for_every_good_fit_company(wired, monkeypatch):
+    monkeypatch.setattr(wired, "linkedin_daily_notes", 4)
+    run_id, p = new_run([FakeProvider("gemini")])
+    p.execute()
+    with session_scope() as s:
+        notes = list(s.scalars(select(LinkedInNote)))
+        noted_statuses = {n.job.status for n in notes}
+        pages = {n.job.company: n.company_linkedin_url for n in notes}
+    assert len(notes) == 4 == p.stats["linkedin_notes"]  # 6 good fits, capped at today's 4
+    assert noted_statuses == {JobStatus.DRAFTED, JobStatus.SCORED}  # emailed jobs get one too
+    assert pages["Company0"] == "https://www.linkedin.com/company/company0"
+
+    _, p2 = new_run([FakeProvider("gemini")])
+    p2.execute()
+    with session_scope() as s:
+        assert len(list(s.scalars(select(LinkedInNote)))) == 4  # today's quota already used
+
+
 def test_only_one_run_at_a_time(wired):
     assert runner.start_run("manual") is not None
     assert runner.start_run("cron") is None
@@ -177,5 +198,10 @@ def test_dashboard_endpoints_after_a_run(wired):
         stats = c.get("/stats", headers=h).json()
         assert stats["drafts_by_status"]["replied"] == 1 and stats["reply_rate"] == 100.0
         assert stats["jobs_by_status"]["scored"] == 3 and stats["last_run"]["status"] == "success"
+        notes = c.get("/linkedin?status=pending", headers=h).json()
+        assert notes and notes[0]["note"] and notes[0]["people_url"].startswith("https://www.linkedin.com/")
+        assert notes[0]["max_chars"] == 300
+        assert c.patch(f"/linkedin/{notes[0]['id']}", json={"status": "sent"}, headers=h).json()["status"] == "sent"
+        assert c.get("/stats", headers=h).json()["linkedin_by_status"]["sent"] == 1
         job_id = c.get("/jobs?status=low_score", headers=h).json()[0]["id"]
         assert c.patch(f"/jobs/{job_id}", json={"status": "scored"}, headers=h).json()["status"] == "scored"

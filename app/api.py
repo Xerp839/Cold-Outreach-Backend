@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import get_settings
 from app.db import get_db
 from app.gmail import GmailDrafts
-from app.models import Draft, DraftStatus, Event, Job, JobStatus, ProviderUsage, Run, utcnow
+from app.models import Draft, DraftStatus, Event, Job, JobStatus, LinkedInNote, ProviderUsage, Run, utcnow
+from app.pipeline.linkedin import company_links
 from app.pipeline.runner import ist_day_start, run_pipeline, start_run
 from app.providers.finders import Hunter
 
@@ -48,6 +49,18 @@ def draft_out(d: Draft) -> dict:
         "contact_confidence": d.contact.confidence if d.contact else None,
         "created_at": d.created_at, "status_changed_at": d.status_changed_at, "llm_provider": d.llm_provider,
         "job": {"id": d.job.id, "title": d.job.title, "company": d.job.company, "url": d.job.url, "score": d.job.score},
+    }
+
+
+def linkedin_out(n: LinkedInNote) -> dict:
+    j = n.job
+    return {
+        "id": n.id, "status": n.status, "note": n.note, "created_at": n.created_at,
+        "status_changed_at": n.status_changed_at, "llm_provider": n.llm_provider,
+        "max_chars": get_settings().linkedin_note_max_chars,
+        "job": {"id": j.id, "title": j.title, "company": j.company, "url": j.url, "score": j.score, "status": j.status,
+                "location": j.location},
+        **company_links(j.company, n.company_linkedin_url),
     }
 
 
@@ -97,6 +110,7 @@ def stats(db: Session = Depends(get_db)):
     total_drafts = sum(draft_counts.values())
     sent = draft_counts.get(DraftStatus.SENT, 0) + draft_counts.get(DraftStatus.REPLIED, 0)
     last_run = db.scalar(select(Run).order_by(Run.id.desc()).limit(1))
+    linkedin_counts = dict(db.execute(select(LinkedInNote.status, func.count()).group_by(LinkedInNote.status)).all())
     return {
         "drafts_today": db.scalar(select(func.count()).select_from(Draft).where(Draft.created_at >= today)),
         "drafts_this_week": db.scalar(select(func.count()).select_from(Draft).where(Draft.created_at >= week)),
@@ -105,6 +119,7 @@ def stats(db: Session = Depends(get_db)):
         "jobs_by_status": job_counts,
         "reply_rate": round(draft_counts.get(DraftStatus.REPLIED, 0) / sent * 100, 1) if sent else None,
         "total_drafts": total_drafts,
+        "linkedin_by_status": linkedin_counts,
         "errors_last_7d": db.scalar(select(func.count()).select_from(Event).where(Event.level == "error", Event.created_at >= week)),
         "last_run": run_out(last_run) if last_run else None,
     }
@@ -161,6 +176,31 @@ def update_draft(draft_id: int, body: DraftUpdate, db: Session = Depends(get_db)
     d.status, d.status_changed_at = body.status, utcnow()
     db.flush()
     return draft_out(d)
+
+
+# --------------------------------------------------------------------------- LinkedIn notes
+
+
+@router.get("/linkedin")
+def list_linkedin(status: str | None = None, limit: int = Query(100, le=500), db: Session = Depends(get_db)):
+    q = select(LinkedInNote).options(selectinload(LinkedInNote.job)).order_by(LinkedInNote.id.desc()).limit(limit)
+    if status:
+        q = q.where(LinkedInNote.status == status)
+    return [linkedin_out(n) for n in db.scalars(q)]
+
+
+class LinkedInUpdate(BaseModel):
+    status: Literal["pending", "sent", "replied", "skipped"]
+
+
+@router.patch("/linkedin/{note_id}")
+def update_linkedin(note_id: int, body: LinkedInUpdate, db: Session = Depends(get_db)):
+    n = db.get(LinkedInNote, note_id)
+    if not n:
+        raise HTTPException(404)
+    n.status, n.status_changed_at = body.status, utcnow()
+    db.flush()
+    return linkedin_out(n)
 
 
 # --------------------------------------------------------------------------- jobs

@@ -1,4 +1,4 @@
-"""One pipeline run: fetch -> rule filter -> LLM score -> find contact -> write -> Gmail draft.
+"""One pipeline run: fetch -> rule filter -> LLM score -> find contact -> write -> Gmail draft -> LinkedIn notes.
 
 Every stage commits per item, so a crash or quota wall halfway through keeps the work already done,
 and the next run picks up where this one stopped.
@@ -15,10 +15,11 @@ from sqlalchemy import func, select, update
 from app.config import Settings, get_settings
 from app.db import session_scope
 from app.gmail import GmailDrafts, build_message
-from app.models import Company, Contact, Draft, Job, JobStatus, Run, as_aware, utcnow
+from app.models import Company, Contact, Draft, Job, JobStatus, LinkedInNote, Run, as_aware, utcnow
 from app.pipeline.contacts import find_contact
 from app.pipeline.fetch import RawJob, fetch_ats, fetch_jobspy, load_ats_companies
 from app.pipeline.filters import rule_filter
+from app.pipeline.linkedin import write_note
 from app.pipeline.resume import get_resume_text
 from app.pipeline.scoring import score_job
 from app.pipeline.writer import write_email
@@ -92,6 +93,8 @@ class PipelineRun:
             self.score_stage()
             self.save_stats()
             self.draft_stage()
+            self.save_stats()
+            self.linkedin_stage()
             self.save_stats(status="partial" if self.errors else "success")
             self.log("run", "info", f"finished: {dict(self.stats)}")
         except Exception as e:
@@ -142,6 +145,7 @@ class PipelineRun:
                 s.add(Job(
                     dedupe_key=key, source=rj.source, external_id=rj.external_id, url=rj.url, apply_url=rj.apply_url,
                     title=rj.title[:300], company=rj.company[:300], company_domain=rj.company_domain,
+                    company_linkedin_url=rj.company_linkedin_url,
                     location=(rj.location or "")[:300] or None, is_remote=rj.is_remote, description=rj.description,
                     experience_text=rj.experience_text, salary_text=rj.salary_text, jd_emails=rj.jd_emails or None,
                     posted_at=rj.posted_at, run_id=self.run_id,
@@ -275,6 +279,53 @@ class PipelineRun:
                     remaining -= 1
                     self.stats["drafted"] += 1
                     self.stats[f"contact_via_{cand.source}"] += 1
+
+    # ----------------------------------------------------------------------- LinkedIn notes
+
+    def linkedin_stage(self) -> None:
+        """A connection note for every good-fit job (emailed or not), one company at a time, best scores first."""
+        settings = self.settings
+        with session_scope() as s:
+            made_today = s.scalar(
+                select(func.count()).select_from(LinkedInNote).where(LinkedInNote.created_at >= ist_day_start()))
+            recent = utcnow() - timedelta(days=settings.company_cooldown_days)
+            noted = {company_key(c) for c in s.scalars(
+                select(Job.company).join(LinkedInNote, LinkedInNote.job_id == Job.id).where(LinkedInNote.created_at >= recent))}
+            cutoff = utcnow() - timedelta(days=settings.job_freshness_days)
+            ids = list(s.scalars(
+                select(Job.id)
+                .outerjoin(LinkedInNote, LinkedInNote.job_id == Job.id)
+                .where(LinkedInNote.id.is_(None), Job.score >= settings.min_score, Job.fetched_at >= cutoff,
+                       Job.status.in_([JobStatus.SCORED, JobStatus.NO_CONTACT, JobStatus.DRAFTED]))
+                .order_by(Job.score.desc(), Job.posted_at.desc().nulls_last())
+            ))
+        remaining = settings.linkedin_daily_notes - made_today
+        for job_id in ids:
+            if remaining <= 0:
+                break
+            if not self.llm.any_available:
+                self.log("linkedin", "error", "all LLM providers exhausted - LinkedIn notes will continue next run")
+                break
+            with session_scope() as s:
+                job = s.get(Job, job_id)
+                key = company_key(job.company)
+                if key in noted:
+                    continue
+                try:
+                    note, provider = write_note(self.llm, settings, self.resume_text, job)
+                except (AllProvidersFailed, ProviderError) as e:
+                    self.log("linkedin", "warning", f"note failed for #{job.id}: {e}", job.id)
+                    continue
+                # Naukri/Indeed jobs don't carry the LinkedIn page; another listing from the same company might.
+                page = job.company_linkedin_url or s.scalar(
+                    select(Job.company_linkedin_url)
+                    .where(func.lower(Job.company) == job.company.lower(), Job.company_linkedin_url.is_not(None))
+                    .limit(1))
+                s.add(LinkedInNote(job_id=job.id, run_id=self.run_id, note=note, company_linkedin_url=page,
+                                   llm_provider=provider))
+                noted.add(key)
+                remaining -= 1
+                self.stats["linkedin_notes"] += 1
 
 
 def run_pipeline(run_id: int) -> None:

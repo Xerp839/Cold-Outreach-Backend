@@ -34,6 +34,7 @@ class RawJob:
     external_id: str | None = None
     apply_url: str | None = None
     company_domain: str | None = None
+    company_linkedin_url: str | None = None
     location: str | None = None
     is_remote: bool = False
     description: str | None = None
@@ -99,6 +100,12 @@ def _as_date(v) -> date | None:
 # --------------------------------------------------------------------------- JobSpy
 
 
+def _linkedin_company_url(url) -> str | None:
+    # JobSpy's company_url is the job board's company page; only LinkedIn's is worth keeping.
+    url = str(url or "").split("?")[0].rstrip("/")
+    return url if "linkedin.com/company/" in url else None
+
+
 def fetch_jobspy(settings: Settings, site: str, term: str) -> list[RawJob]:
     from jobspy import scrape_jobs  # heavy import (pandas), keep it lazy
 
@@ -131,6 +138,7 @@ def fetch_jobspy(settings: Settings, site: str, term: str) -> list[RawJob]:
             title=str(r["title"]).strip(),
             company=str(r["company"]).strip(),
             company_domain=domain_from_url(r.get("company_url_direct")) or domain_from_url(r.get("job_url_direct")),
+            company_linkedin_url=_linkedin_company_url(r.get("company_url")),
             location=r.get("location"),
             is_remote=bool(r.get("is_remote")) or "remote" in str(r.get("work_from_home_type") or "").lower(),
             description=r.get("description"),

@@ -96,8 +96,10 @@ One domain search per company returns people with emails, shared inboxes, and th
 The app picks a recruiter / HR / engineering manager if there is one, otherwise a `careers@` / `hr@` / `jobs@`
 inbox, so a search rarely comes back empty-handed.
 
-The free plan has **60 searches a month** (resets monthly). `HUNTER_DAILY_SEARCHES=2` spreads them over the
-month: good-fit jobs past today's two lookups stay queued for tomorrow instead of being dropped. Jobs whose
+The free plan has **50 searches a month** (60 the first month if you watch the intro video). Each run reads what's
+left and the reset date from Hunter, and allows (searches left / days until reset) per day, capped at
+`HUNTER_DAILY_SEARCHES=2` - so they last until the reset whatever the plan size. Good-fit jobs past today's share
+stay queued for tomorrow instead of being dropped. Jobs whose
 posting includes an email never use a search. The Providers page shows used / available, read from Hunter's free
 `/account` endpoint.
 
@@ -123,7 +125,7 @@ Fill in `.env`:
 Then:
 
 ```powershell
-pytest                         # 30 tests, no network, uses a local SQLite file
+pytest                         # offline, uses a local SQLite file
 python -m app.run_once         # one full real run: fetch -> score -> contacts -> Gmail drafts
 ```
 
@@ -191,8 +193,12 @@ Notes:
 2. Drafts flagged **verify before sending** on the dashboard use a guessed email (name + company pattern).
    Double-check the person on LinkedIn, or skip it.
 3. Mark drafts **sent** / **replied** on the dashboard - that's how the reply rate is tracked.
-4. **Jobs -> Apply manually**: good-fit jobs where no email was found. Apply on the site, or find someone on
-   LinkedIn.
+4. **LinkedIn**: one note per good-fit company (up to 10 a day). Click **Company page** / **Find recruiters**,
+   pick a recruiter or the hiring manager, type their first name, **Copy note**, paste it into *Add a note* on
+   the connection request, then **Mark sent**. Notes fit LinkedIn's 300-character Premium limit (set
+   `LINKEDIN_NOTE_MAX_CHARS=200` on a free account). Jobs from Naukri/Indeed link to a LinkedIn search instead
+   of the company page.
+5. **Jobs -> Apply manually**: good-fit jobs where no email was found. Apply on the site too.
 
 ## Changing things later
 
@@ -200,6 +206,7 @@ Notes:
 |---|---|
 | Swap resume | Replace the file on Drive (same link), or update `RESUME_URL` in `.env` + Render |
 | More / fewer drafts | `DAILY_DRAFT_TARGET` |
+| More / fewer LinkedIn notes | `LINKEDIN_DAILY_NOTES` (LinkedIn allows ~100 invitations a week) |
 | Stricter / looser fit | `MIN_SCORE` (default 70) |
 | Different roles | `SEARCH_TERMS`, and `TITLE_INCLUDE` / `TITLE_EXCLUDE` in `app/config.py` |
 | Target specific companies | Add their Greenhouse / Lever / Ashby board to `config/companies.json` (see README) |

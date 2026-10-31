@@ -32,6 +32,13 @@ class DraftStatus:
     SKIPPED = "skipped"
 
 
+class LinkedInStatus:
+    PENDING = "pending"
+    SENT = "sent"
+    REPLIED = "replied"
+    SKIPPED = "skipped"
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
@@ -44,6 +51,7 @@ class Job(Base):
     title: Mapped[str] = mapped_column(String(300))
     company: Mapped[str] = mapped_column(String(300), index=True)
     company_domain: Mapped[str | None] = mapped_column(String(200))
+    company_linkedin_url: Mapped[str | None] = mapped_column(Text)  # only LinkedIn listings carry it
     location: Mapped[str | None] = mapped_column(String(300))
     is_remote: Mapped[bool] = mapped_column(Boolean, default=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -113,6 +121,24 @@ class Draft(Base):
 
     job: Mapped[Job] = relationship(back_populates="drafts")
     contact: Mapped[Contact] = relationship()
+
+
+class LinkedInNote(Base):
+    """Connection-request note, copied from the dashboard and sent by hand."""
+
+    __tablename__ = "linkedin_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), unique=True)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id"))
+    note: Mapped[str] = mapped_column(Text)
+    company_linkedin_url: Mapped[str | None] = mapped_column(Text)
+    llm_provider: Mapped[str | None] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(20), default=LinkedInStatus.PENDING, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    job: Mapped[Job] = relationship()
 
 
 class Run(Base):

@@ -1,15 +1,18 @@
+from datetime import date
+
 import pytest
 
 from app.config import get_settings
 from app.emails import apply_pattern, domain_from_url, extract_emails, first_name_from_email
 from app.gmail import build_message
 from app.pipeline.contacts import rank_candidates, title_rank
-from app.pipeline.fetch import RawJob
+from app.pipeline.fetch import RawJob, _linkedin_company_url
+from app.pipeline.linkedin import company_links, note_limit, write_note
 from app.pipeline.filters import min_required_years, rule_filter
 from app.pipeline.resume import drive_download_url
 from app.pipeline.runner import company_key
 from app.pipeline.writer import _validate, build_signature, greeting
-from app.providers.finders import Candidate, Hunter
+from app.providers.finders import Candidate, Hunter, hunter_daily_share
 from app.providers.llm import ProviderError, parse_json
 
 DESC = "We are building LLM agents with FastAPI and LangGraph. " * 10
@@ -165,3 +168,48 @@ def test_hunter_falls_back_to_careers_inbox_and_respects_daily_budget(monkeypatc
     assert pattern == "{first}"
     assert not hunter.enabled and hunter.waiting_for_tomorrow
     assert rank_candidates([people[-1], Candidate(source="hunter", email="p@acme.in", title="HR Manager")])[0].title == "HR Manager"
+
+
+def test_hunter_share_spreads_whats_left_until_reset():
+    account = {"used": 0, "available": 50, "reset_date": "2026-11-30"}
+    assert hunter_daily_share(2, account, 0, date(2026, 11, 1)) == 2  # 50 over 29 days
+    account = {"used": 44, "available": 50, "reset_date": "2026-11-30"}
+    assert hunter_daily_share(2, account, 0, date(2026, 11, 24)) == 1  # 6 left over 6 days
+    account = {"used": 50, "available": 50, "reset_date": "2026-11-30"}
+    assert hunter_daily_share(2, account, 0, date(2026, 11, 28)) == 0
+    assert hunter_daily_share(2, account, 1, date(2026, 11, 29)) == 1  # today's own search counts as today's
+    assert hunter_daily_share(2, None, 0, date(2026, 11, 1)) == 2
+
+
+def test_linkedin_company_url_only_from_linkedin():
+    assert _linkedin_company_url("https://in.linkedin.com/company/acme-ai?trk=x") == "https://in.linkedin.com/company/acme-ai"
+    assert _linkedin_company_url("https://www.naukri.com/acme-jobs") is None
+    assert _linkedin_company_url(None) is None
+
+
+def test_company_links():
+    known = company_links("Acme AI", "https://www.linkedin.com/company/acme-ai/")
+    assert known["people_url"] == "https://www.linkedin.com/company/acme-ai/people/?keywords=recruiter"
+    unknown = company_links("Acme AI", None)
+    assert not unknown["company_page_known"] and "keywords=Acme%20AI" in unknown["company_url"]
+
+
+class ScriptedLLM:
+    def __init__(self, *replies):
+        self.replies, self.prompts = list(replies), []
+
+    def complete_json(self, system, user):
+        self.prompts.append(user)
+        return {"note": self.replies.pop(0)}, "gemini"
+
+
+def test_write_note_retries_when_too_long():
+    s = get_settings()
+    j = type("J", (), dict(title="AI Engineer", company="Acme", location="Mumbai", is_remote=False,
+                           description=DESC, score_details={"fit_points": ["x"]}))()
+    short = "Saw the AI Engineer role at Acme. I ship LLM agents at Quantal. Would love to connect."
+    llm = ScriptedLLM("x" * (note_limit(s) + 1), short)
+    assert write_note(llm, s, "resume", j) == (short, "gemini")
+    assert "hard limit" in llm.prompts[1]
+    with pytest.raises(ProviderError):
+        write_note(ScriptedLLM("see https://x.io", "see https://x.io"), s, "resume", j)

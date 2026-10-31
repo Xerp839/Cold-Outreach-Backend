@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # --- Contact finders ---
     apollo_api_key: str = ""
     hunter_api_key: str = ""
-    hunter_daily_searches: int = 2  # free plan: 60 searches/month -> spread over 30 days
+    hunter_daily_searches: int = 2  # cap; the real share is credits left / days until Hunter resets
 
     # --- Job search ---
     # Stack keywords (LangChain, FastAPI) surface far more junior-friendly matches than role titles alone,
@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     max_jobs_to_score: int = 40
     max_contact_lookups: int = 8
     company_cooldown_days: int = 30
+
+    # --- LinkedIn connection notes (copied from the dashboard, sent by hand) ---
+    linkedin_daily_notes: int = 10  # LinkedIn caps invitations at roughly 100 a week
+    linkedin_note_max_chars: int = 300  # Premium limit; free accounts get 200
     job_freshness_days: int = 7
 
     @field_validator(

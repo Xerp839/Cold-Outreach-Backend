@@ -12,11 +12,14 @@ GitHub Actions cron (09:00 IST)
      4. contact    email in JD -> Apollo (paid plans only) -> Hunter (2 searches/day) -> careers@ inbox
      5. write      LLM writes the body; links + signature appended in code
      6. draft      IMAP APPEND into Gmail Drafts (never sends)
+     7. linkedin   connection note for each good-fit company -> dashboard LinkedIn tab, sent by hand
 ```
 
 Quality over volume: at most `DAILY_DRAFT_TARGET` (5) drafts a day, only jobs scoring `MIN_SCORE` (70)+,
 one job per company per run, no company twice within 30 days, no email address ever twice.
 Good-fit jobs without a findable contact show up in the dashboard under **Apply manually**.
+Every good-fit company (emailed or not) also gets a LinkedIn connection note, up to `LINKEDIN_DAILY_NOTES` (10) a day:
+the dashboard links the company page and its recruiters, you add their first name and copy the note.
 
 ## Setup
 
@@ -73,4 +76,5 @@ The slug is the last part of their careers URL (`boards.greenhouse.io/<slug>`, `
 | GET | `/stats` | today's count, reply rate, jobs by status |
 | GET | `/drafts?status=` / PATCH `/drafts/{id}` | mark `sent` / `replied` / `skipped` |
 | GET | `/jobs?status=no_contact` / PATCH `/jobs/{id}` | apply-manually list; requeue (`scored`) or dismiss |
+| GET | `/linkedin?status=` / PATCH `/linkedin/{id}` | connection notes; mark `sent` / `replied` / `skipped` |
 | GET | `/providers`, `/events?level=error`, `/check/gmail` | health of everything |

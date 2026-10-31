@@ -1,7 +1,9 @@
 """Contact finders: Apollo (people search + email reveal) and Hunter (domain search + email pattern)."""
 
+import math
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 import httpx
 
@@ -186,7 +188,21 @@ class Hunter:
         return {"used": searches.get("used"), "available": searches.get("available"), "reset_date": data.get("reset_date")}
 
 
+def hunter_daily_share(cap: int, account: dict | None, used_today: int, today: date) -> int:
+    """Searches allowed today: what's left this cycle spread evenly over the days until Hunter resets, at most `cap`.
+    Paces itself to 50 (free), 60 (free + bonus) or anything else, and never runs dry before the reset."""
+    try:
+        left = account["available"] - account["used"] + used_today  # as of this morning
+        days = max(1, (date.fromisoformat(account["reset_date"]) - today).days)
+    except (TypeError, KeyError, ValueError):
+        return cap  # account endpoint unavailable: fall back to the fixed cap
+    return min(cap, math.ceil(max(left, 0) / days))
+
+
 def finders_from_settings() -> tuple[Apollo, Hunter]:
     s = get_settings()
-    hunter_left = s.hunter_daily_searches - calls_today("hunter") if s.hunter_api_key else None
-    return Apollo(s.apollo_api_key), Hunter(s.hunter_api_key, daily_left=hunter_left)
+    hunter = Hunter(s.hunter_api_key)
+    if s.hunter_api_key:
+        used = calls_today("hunter")
+        hunter.daily_left = hunter_daily_share(s.hunter_daily_searches, hunter.remaining_searches(), used, date.today()) - used
+    return Apollo(s.apollo_api_key), hunter
