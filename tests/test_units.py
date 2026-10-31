@@ -9,7 +9,7 @@ from app.pipeline.filters import min_required_years, rule_filter
 from app.pipeline.resume import drive_download_url
 from app.pipeline.runner import company_key
 from app.pipeline.writer import _validate, build_signature, greeting
-from app.providers.finders import Candidate
+from app.providers.finders import Candidate, Hunter
 from app.providers.llm import ProviderError, parse_json
 
 DESC = "We are building LLM agents with FastAPI and LangGraph. " * 10
@@ -142,3 +142,26 @@ def test_build_message():
     assert msg["To"] == "Priya Sharma <priya@acme.in>"
     assert msg["From"] == "Test Candidate <me@gmail.com>"
     assert msg.get_content().strip() == "Body"
+
+
+def test_hunter_falls_back_to_careers_inbox_and_respects_daily_budget(monkeypatch):
+    emails = [
+        {"value": "ravi@acme.in", "type": "personal", "first_name": "Ravi", "position": "Marketing Lead"},
+        {"value": "info@acme.in", "type": "generic"},
+        {"value": "careers@acme.in", "type": "generic", "confidence": 90},
+    ]
+
+    class Resp:
+        status_code, text = 200, ""
+
+        def json(self):
+            return {"data": {"emails": emails, "pattern": "{first}"}}
+
+    monkeypatch.setattr("app.providers.finders.httpx.get", lambda *a, **kw: Resp())
+    monkeypatch.setattr("app.providers.finders.record_usage", lambda *a, **kw: None)
+    hunter = Hunter("k", daily_left=1)
+    people, pattern = hunter.domain_search("acme.in")
+    assert [c.email for c in rank_candidates(people)] == ["careers@acme.in"]  # marketing + info@ aren't worth emailing
+    assert pattern == "{first}"
+    assert not hunter.enabled and hunter.waiting_for_tomorrow
+    assert rank_candidates([people[-1], Candidate(source="hunter", email="p@acme.in", title="HR Manager")])[0].title == "HR Manager"

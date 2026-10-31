@@ -18,6 +18,12 @@ def log_event(run_id: int | None, stage: str, level: str, message: str, job_id: 
         logger.exception("failed to persist event")
 
 
+def calls_today(provider: str) -> int:
+    with session_scope() as s:
+        row = s.scalar(select(ProviderUsage).where(ProviderUsage.provider == provider, ProviderUsage.day == date.today()))
+        return row.calls if row else 0
+
+
 def record_usage(provider: str, *, ok: bool, exhausted: bool = False, error: str | None = None) -> None:
     try:
         with session_scope() as s:

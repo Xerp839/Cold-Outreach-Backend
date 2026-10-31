@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # --- Contact finders ---
     apollo_api_key: str = ""
     hunter_api_key: str = ""
+    hunter_daily_searches: int = 2  # free plan: 60 searches/month -> spread over 30 days
 
     # --- Job search ---
     # Stack keywords (LangChain, FastAPI) surface far more junior-friendly matches than role titles alone,

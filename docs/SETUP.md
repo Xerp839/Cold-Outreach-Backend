@@ -9,7 +9,7 @@ Do the sections in order: each one produces a value that goes into `.env` (and l
 | 2 | Google account | Gmail app password | `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD` |
 | 3 | Google AI Studio | Gemini key | `GEMINI_API_KEY` |
 | 4 | Groq console | Groq key | `GROQ_API_KEY` |
-| 5 | Apollo | API key | `APOLLO_API_KEY` |
+| 5 | Apollo (skip on free plan) | API key | `APOLLO_API_KEY` |
 | 6 | Hunter | API key | `HUNTER_API_KEY` |
 | 7 | Your machine | `.env`, first real run | - |
 | 8 | Render | Backend URL | GitHub secret `BACKEND_URL`, Vercel `VITE_API_URL` |
@@ -80,30 +80,26 @@ and switches to Groq for the rest of the day once the daily quota is hit.
 1. [console.groq.com](https://console.groq.com) -> **API Keys** -> **Create API Key**.
 2. Copy -> `GROQ_API_KEY`.
 
-## 5. Apollo (contacts, tried first)
+## 5. Apollo (skip unless you pay for it)
 
-1. Sign up at [apollo.io](https://www.apollo.io) (free plan). Apollo's docs say free accounts need a **work email**
-   for API search. Try your Gmail first; if search calls get rejected, the app just falls back to Hunter.
-   Avoid using your current employer's email - the account (and its credits) would be tied to that job.
-2. **Settings** -> **Integrations** -> **API** -> **Create new key**. If it offers **Set as master key**, turn it on.
-3. Copy -> `APOLLO_API_KEY`.
+Apollo's free plan doesn't include the two APIs this app needs (people search and people match), and it only
+accepts sign-ups from a work email. Leave `APOLLO_API_KEY` empty: the pipeline skips Apollo and goes straight
+to Hunter. If you ever get a paid Apollo plan, create a key under **Settings -> Integrations -> API** (as a
+master key) and set it - Apollo is then tried before Hunter, with no other change needed.
 
-The app uses two endpoints:
-- people search - finds recruiters / HR / engineering managers at the company domain. **0 credits.**
-- people match - reveals one person's email. **1 credit** when an email comes back. The free plan gets roughly
-  900-1200 credits a year, granted monthly (~75-100 a month).
+## 6. Hunter (contacts)
 
-If the free plan blocks the API or credits run out, Apollo answers 401/403/429; the app marks Apollo
-**exhausted** for the day and moves on to Hunter. Nothing breaks - you'll see it on the dashboard's Providers page.
-
-## 6. Hunter (contacts, fallback + email pattern)
-
-1. Sign up at [hunter.io](https://hunter.io) (free plan).
+1. Sign up at [hunter.io](https://hunter.io) (free plan). It may also want a non-Gmail address; a college email works.
 2. Dashboard -> **API** -> copy the key -> `HUNTER_API_KEY`.
 
-One domain search per company: it returns people with emails **and** the company's email pattern
-(e.g. `{first}.{last}`). The free plan has 50 credits a month (a domain search costs 1), so they go fast. The
-Providers page shows used / available, read from Hunter's free `/account` endpoint.
+One domain search per company returns people with emails, shared inboxes, and the company's email pattern.
+The app picks a recruiter / HR / engineering manager if there is one, otherwise a `careers@` / `hr@` / `jobs@`
+inbox, so a search rarely comes back empty-handed.
+
+The free plan has **60 searches a month** (resets monthly). `HUNTER_DAILY_SEARCHES=2` spreads them over the
+month: good-fit jobs past today's two lookups stay queued for tomorrow instead of being dropped. Jobs whose
+posting includes an email never use a search. The Providers page shows used / available, read from Hunter's free
+`/account` endpoint.
 
 ## 7. Local `.env` and first run
 
@@ -216,6 +212,5 @@ Notes:
 | Run fails on start with a DB error | `DATABASE_URL` is the Direct connection, or the password has unencoded special characters |
 | `check/gmail` fails with `AUTHENTICATIONFAILED` | App password wrong/revoked, or `GMAIL_ADDRESS` isn't the account that owns it |
 | Providers shows Gemini **exhausted** early | Daily free quota used; Groq takes over until tomorrow |
-| Apollo **exhausted** on the first call | Free plan has no API access for that endpoint, or key isn't a master key - Hunter takes over |
 | 0 drafts, many jobs in **Apply manually** | Contact finders out of credits; those jobs wait there for you |
 | 0 jobs passed the filter | Search terms too narrow or `MAX_REQUIRED_EXPERIENCE` too strict; check Jobs -> Filtered for the reasons |

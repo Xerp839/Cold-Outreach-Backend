@@ -2,7 +2,7 @@
 
 1. Emails printed in the job description (free, and the poster asked for them).
 2. Apollo people search -> reveal one email (1 credit).
-3. Hunter domain search (1 search credit) -> best matching person, and the company's email pattern.
+3. Hunter domain search (1 search credit) -> best matching person, else a careers@/hr@ inbox, and the email pattern.
 4. Apollo name + Hunter pattern -> constructed email (low confidence, flagged in the dashboard).
 
 Results are cached per company so credits are never spent twice on the same company.
@@ -16,7 +16,8 @@ from app.models import Company, Job, utcnow
 from app.providers.finders import TARGET_TITLES, Apollo, Candidate, Hunter
 from app.providers.llm import ProviderError, ProviderExhausted
 
-_TITLE_PATTERNS = [re.compile(r"(?<![a-z])" + re.escape(t) + r"(?![a-z])") for t in TARGET_TITLES]
+# A named person beats a shared careers@ inbox, but the inbox beats no contact at all.
+_TITLE_PATTERNS = [re.compile(r"(?<![a-z])" + re.escape(t) + r"(?![a-z])") for t in TARGET_TITLES + ["careers inbox"]]
 
 
 def title_rank(title: str | None) -> int | None:

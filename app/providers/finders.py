@@ -1,12 +1,13 @@
 """Contact finders: Apollo (people search + email reveal) and Hunter (domain search + email pattern)."""
 
+import re
 from dataclasses import dataclass, field
 
 import httpx
 
 from app.config import get_settings
 from app.providers.llm import ProviderError, ProviderExhausted
-from app.tracking import record_usage
+from app.tracking import calls_today, record_usage
 
 TARGET_TITLES = [
     "talent acquisition", "technical recruiter", "recruiter", "recruitment", "hiring",
@@ -105,17 +106,26 @@ class Apollo:
         return candidate
 
 
+_HIRING_INBOX_RE = re.compile(r"^(careers?|jobs?|hr|hiring|recruit\w*|talent\w*|people)([._-]|$)")
+
+
 class Hunter:
     name = "hunter"
     base = "https://api.hunter.io/v2"
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, daily_left: int | None = None):
         self.api_key = api_key
         self.exhausted = False
+        self.daily_left = daily_left  # None = no daily cap
 
     @property
     def enabled(self) -> bool:
-        return bool(self.api_key) and not self.exhausted
+        return bool(self.api_key) and not self.exhausted and (self.daily_left is None or self.daily_left > 0)
+
+    @property
+    def waiting_for_tomorrow(self) -> bool:
+        """Credits are left this month, but today's share is spent."""
+        return bool(self.api_key) and not self.exhausted and self.daily_left is not None and self.daily_left <= 0
 
     def _get(self, path: str, params: dict, *, track: bool = True) -> dict:
         try:
@@ -139,11 +149,18 @@ class Hunter:
         return resp.json().get("data", {})
 
     def domain_search(self, domain: str) -> tuple[list[Candidate], str | None]:
-        """One search credit. Returns people with emails + the company's email pattern."""
-        data = self._get("/domain-search", {"domain": domain, "type": "personal", "limit": 10})
+        """One search credit. Returns people with emails, hiring inboxes (careers@, hr@) and the company's email pattern."""
+        if self.daily_left is not None:
+            self.daily_left -= 1
+        data = self._get("/domain-search", {"domain": domain, "limit": 10})
         out = []
         for e in data.get("emails", []):
             if not _usable_email(e.get("value")):
+                continue
+            if e.get("type") == "generic":
+                if _HIRING_INBOX_RE.match(e["value"].split("@")[0].lower()):
+                    out.append(Candidate(source="hunter", email=e["value"], title="careers inbox",
+                                         confidence=e.get("confidence")))
                 continue
             out.append(Candidate(
                 source="hunter",
@@ -171,4 +188,5 @@ class Hunter:
 
 def finders_from_settings() -> tuple[Apollo, Hunter]:
     s = get_settings()
-    return Apollo(s.apollo_api_key), Hunter(s.hunter_api_key)
+    hunter_left = s.hunter_daily_searches - calls_today("hunter") if s.hunter_api_key else None
+    return Apollo(s.apollo_api_key), Hunter(s.hunter_api_key, daily_left=hunter_left)

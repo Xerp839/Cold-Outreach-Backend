@@ -9,7 +9,7 @@ GitHub Actions cron (09:00 IST)
      1. fetch      LinkedIn, Naukri, Indeed (JobSpy) + optional Greenhouse/Lever/Ashby boards
      2. filter     free rules: title, years asked, salary, location, blocklist, dedupe
      3. score      Gemini -> Groq fallback, scored against my resume (read from the Drive link)
-     4. contact    email in JD -> Apollo -> Hunter -> Apollo name + Hunter pattern
+     4. contact    email in JD -> Apollo (paid plans only) -> Hunter (2 searches/day) -> careers@ inbox
      5. write      LLM writes the body; links + signature appended in code
      6. draft      IMAP APPEND into Gmail Drafts (never sends)
 ```

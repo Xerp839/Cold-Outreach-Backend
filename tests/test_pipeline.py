@@ -3,21 +3,14 @@
 import pytest
 from sqlalchemy import select
 
-from app.db import Base, engine, session_scope
+from app.db import session_scope
 from app.models import Draft, Job, JobStatus, Run
 from app.pipeline import runner
 from app.pipeline.fetch import RawJob
-from app.providers.finders import Candidate
+from app.providers.finders import Apollo, Candidate, Hunter
 from app.providers.llm import ProviderExhausted
 
 DESC = "Build LLM agents with FastAPI and LangGraph. 1-3 years experience. " * 8
-
-
-@pytest.fixture(autouse=True)
-def fresh_db():
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    yield
 
 
 class FakeProvider:
@@ -148,6 +141,18 @@ def test_all_llms_exhausted_leaves_jobs_for_next_run(wired):
         new_left = s.scalars(select(Job).where(Job.status == JobStatus.NEW)).all()
     assert run.status == "partial"
     assert len(new_left) >= 3
+
+
+def test_jobs_wait_for_tomorrow_when_hunter_share_is_spent(wired, monkeypatch):
+    monkeypatch.setattr(runner, "finders_from_settings", lambda: (Apollo(""), Hunter("k", daily_left=0)))
+    _, p = new_run([FakeProvider("gemini")])
+    p.execute()
+    with session_scope() as s:
+        drafts = list(s.scalars(select(Draft)))
+        waiting = s.scalars(select(Job).where(Job.status_reason == "waiting for tomorrow's Hunter searches")).all()
+        assert all(j.status == JobStatus.SCORED and not j.jd_emails for j in waiting)
+    assert len(drafts) == 3  # the three jobs with an email in the JD don't need Hunter
+    assert waiting and p.stats["no_contact"] == 0  # queued, not dumped into "apply manually"
 
 
 def test_only_one_run_at_a_time(wired):

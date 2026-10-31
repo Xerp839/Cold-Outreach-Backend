@@ -32,7 +32,8 @@ STALE_RUN_AFTER = timedelta(minutes=90)
 
 def ist_day_start() -> datetime:
     now = datetime.now(IST)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # In UTC: SQLite compares timestamps as text, so the offset has to match how they're stored.
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
 
 def company_key(name: str) -> str:
@@ -224,6 +225,12 @@ class PipelineRun:
                     last = as_aware(company.last_drafted_at)
                     if last and last > utcnow() - timedelta(days=settings.company_cooldown_days):
                         job.status_reason = "company contacted recently (cooldown)"
+                        continue
+                    if (not job.jd_emails and company.hunter_checked_at is None and company.apollo_checked_at is None
+                            and not self.apollo.enabled and self.hunter.waiting_for_tomorrow):
+                        # Stays queued instead of landing in "apply manually": tomorrow's Hunter share can look it up.
+                        job.status_reason = "waiting for tomorrow's Hunter searches"
+                        self.stats["waiting_for_hunter"] += 1
                         continue
                     companies_this_run.add(key)
 
