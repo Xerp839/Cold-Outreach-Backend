@@ -20,6 +20,9 @@ Good-fit jobs without a findable contact show up in the dashboard under **Apply 
 
 ## Setup
 
+Step-by-step for every service (Supabase, Gmail, Gemini, Groq, Apollo, Hunter, Render, Vercel, GitHub secrets):
+[docs/SETUP.md](docs/SETUP.md). Short version:
+
 1. **Supabase** - create a project, copy *Connect -> Session pooler* URI into `DATABASE_URL`.
    (Render can't reach Supabase's IPv6-only direct host.) Tables are created on startup.
 2. **Gmail app password** - Google Account -> Security -> 2-Step Verification -> App passwords.
