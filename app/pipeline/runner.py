@@ -4,18 +4,21 @@ Every stage commits per item, so a crash or quota wall halfway through keeps the
 and the next run picks up where this one stopped.
 """
 
+import os
 import re
+import threading
 import time
 import traceback
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from sqlalchemy import func, select, update
 
 from app.config import Settings, get_settings
 from app.db import session_scope
 from app.gmail import GmailDrafts, build_message
-from app.models import Company, Contact, Draft, Job, JobStatus, LinkedInNote, Run, as_aware, utcnow
+from app.models import Company, Contact, Draft, Event, Job, JobStatus, LinkedInNote, Run, as_aware, utcnow
 from app.pipeline.contacts import find_contact
 from app.pipeline.fetch import RawJob, fetch_ats, fetch_jobspy, load_ats_companies
 from app.pipeline.filters import rule_filter
@@ -28,7 +31,7 @@ from app.providers.llm import AllProvidersFailed, LLMChain, ProviderError
 from app.tracking import log_event
 
 IST = timezone(timedelta(hours=5, minutes=30))
-STALE_RUN_AFTER = timedelta(minutes=90)
+STALE_RUN_AFTER = timedelta(hours=3)
 
 
 def ist_day_start() -> datetime:
@@ -59,6 +62,17 @@ def start_run(trigger: str) -> int | None:
         s.add(run)
         s.flush()
         return run.id
+
+
+def fail_interrupted_runs() -> None:
+    """Called when the server starts. There's only one instance, so a run still marked running died with the
+    previous process (Render restarts it after running out of memory, on a deploy, or when it falls asleep)."""
+    with session_scope() as s:
+        for run in s.scalars(select(Run).where(Run.status == "running")):
+            last = s.scalar(select(Event.stage).where(Event.run_id == run.id).order_by(Event.id.desc()).limit(1))
+            run.status, run.finished_at = "failed", utcnow()
+            run.error = (f"server restarted mid-run{f' during {last}' if last else ''} (out of memory, a deploy, "
+                         "or the free instance went to sleep). Nothing is lost: the next run continues from here.")
 
 
 class PipelineRun:
@@ -106,16 +120,27 @@ class PipelineRun:
     def fetch_stage(self) -> None:
         raw: list[RawJob] = []
         for site in self.settings.job_sites:
+            self.stats[f"fetched_{site}"] += 0  # so a site that returned nothing still shows up as 0
             for term in self.settings.search_terms:
+                problems: list[str] = []
                 try:
-                    found = fetch_jobspy(self.settings, site, term)
+                    found = fetch_jobspy(self.settings, site, term, problems)
                     raw.extend(found)
                     self.stats[f"fetched_{site}"] += len(found)
+                    if problems:
+                        self.log("fetch", "warning", f"{site} '{term}': got {len(found)} jobs, {site} said: {'; '.join(problems)[:400]}")
                 except Exception as e:
-                    self.log("fetch", "warning", f"{site} '{term}' failed: {type(e).__name__}: {str(e)[:300]}")
+                    problems.append(f"{type(e).__name__}: {str(e)[:300]}")
+                    self.log("fetch", "warning", f"{site} '{term}' failed: {problems[-1]}")
+                if problems:
+                    self.stats[f"blocked_{site}"] += 1
                     self.stats["fetch_failures"] += 1
                 if site == "linkedin":
                     time.sleep(3)  # be gentle; LinkedIn rate limits aggressively
+            if self.stats[f"fetched_{site}"] == 0:
+                self.log("fetch", "error", f"{site}: 0 jobs from {len(self.settings.search_terms)} searches"
+                         f"{' - it is blocking this server' if self.stats[f'blocked_{site}'] else ''}. "
+                         f"If this repeats, drop it from JOB_SITES.")
         for company in load_ats_companies():
             try:
                 found = fetch_ats(company, self.settings.job_freshness_days)
@@ -328,5 +353,21 @@ class PipelineRun:
                 self.stats["linkedin_notes"] += 1
 
 
+def _keep_awake(url: str, done: threading.Event) -> None:
+    # Render's free plan sleeps after 15 min without inbound requests, even mid-run. A request to our own public
+    # URL counts, so a run started from the dashboard survives the tab being closed.
+    while not done.wait(300):
+        try:
+            httpx.get(f"{url}/health", timeout=30)
+        except httpx.HTTPError:
+            pass
+
+
 def run_pipeline(run_id: int) -> None:
-    PipelineRun(run_id).execute()
+    done = threading.Event()
+    if url := os.environ.get("RENDER_EXTERNAL_URL"):  # set by Render
+        threading.Thread(target=_keep_awake, args=(url, done), daemon=True).start()
+    try:
+        PipelineRun(run_id).execute()
+    finally:
+        done.set()

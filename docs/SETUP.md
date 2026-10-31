@@ -149,8 +149,16 @@ Now do step 1.4 (enable RLS), since the tables exist.
 4. Deploy. Copy the service URL, e.g. `https://cold-outreach-backend.onrender.com`.
 5. Check `https://<your-url>/health` returns `{"ok": true}`.
 
-The free instance sleeps after ~15 minutes idle and takes up to a minute to wake. The cron handles that; the
-dashboard may just be slow on its first request.
+How it copes with the free plan:
+- **Sleeping**: the instance sleeps after ~15 minutes without requests and takes up to a minute to wake, so the
+  dashboard's first request of the day is slow. The cron wakes it before starting a run, and during a run the
+  backend pings its own URL every 5 minutes, so a run started with **Run now** keeps going after you close the tab.
+- **Memory**: a run peaks around 170 MB of the 512 MB.
+- **Restarts**: if Render restarts the instance mid-run (a deploy, a crash), the run shows as *failed* with
+  "server restarted mid-run during <stage>" as soon as it's back up. Nothing is lost - every job is saved as it
+  goes, and the next run continues from there.
+- **Speed**: the free CPU is slow and the LLMs are rate limited, so a run takes anywhere from 10 to 60 minutes. The
+  cron waits up to 2h20m.
 
 ## 9. Vercel (dashboard)
 
@@ -220,4 +228,6 @@ Notes:
 | `check/gmail` fails with `AUTHENTICATIONFAILED` | App password wrong/revoked, or `GMAIL_ADDRESS` isn't the account that owns it |
 | Providers shows Gemini **exhausted** early | Daily free quota used; Groq takes over until tomorrow |
 | 0 drafts, many jobs in **Apply manually** | Contact finders out of credits; those jobs wait there for you |
+| Runs page shows **linkedin down** / **partly blocked** | LinkedIn rate-limits scraping from cloud servers. Naukri/Indeed carry on. If it's down every day, set `JOB_SITES=naukri,indeed` on Render |
+| Run **failed**: "server restarted mid-run" | Render restarted the instance (deploy or crash). The next run continues; if it repeats at the same stage, check Render's **Logs** |
 | 0 jobs passed the filter | Search terms too narrow or `MAX_REQUIRED_EXPERIENCE` too strict; check Jobs -> Filtered for the reasons |

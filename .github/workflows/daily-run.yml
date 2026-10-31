@@ -8,7 +8,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       BACKEND_URL: ${{ secrets.BACKEND_URL }}
       API_KEY: ${{ secrets.API_KEY }}
@@ -35,7 +35,7 @@ jobs:
         if: steps.start.outputs.run_id != ''
         run: |
           id=${{ steps.start.outputs.run_id }}
-          for i in $(seq 1 110); do
+          for i in $(seq 1 280); do
             sleep 30
             status=$(curl -sS --max-time 30 -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs/$id" | jq -r .status || echo unknown)
             echo "[$i] status=$status"

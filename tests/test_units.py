@@ -213,3 +213,22 @@ def test_write_note_retries_when_too_long():
     assert "hard limit" in llm.prompts[1]
     with pytest.raises(ProviderError):
         write_note(ScriptedLLM("see https://x.io", "see https://x.io"), s, "resume", j)
+
+
+def test_fetch_jobspy_collects_what_the_site_logged(monkeypatch):
+    import logging
+    import sys
+    import types
+
+    import pandas as pd
+
+    from app.pipeline.fetch import fetch_jobspy
+
+    def scrape_jobs(**kw):
+        logging.getLogger("jobspy.linkedin").error("response status code 429 (blocked: use a proxy)")
+        return pd.DataFrame([{"title": "AI Engineer", "company": "Acme", "job_url": "https://l/1"}])
+
+    monkeypatch.setitem(sys.modules, "jobspy", types.SimpleNamespace(scrape_jobs=scrape_jobs))
+    problems = []
+    jobs = fetch_jobspy(get_settings(), "linkedin", "AI Engineer", problems)
+    assert len(jobs) == 1 and problems == ["response status code 429 (blocked: use a proxy)"]

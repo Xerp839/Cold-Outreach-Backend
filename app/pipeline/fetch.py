@@ -7,6 +7,7 @@
 
 import html
 import json
+import logging
 import math
 import re
 from dataclasses import dataclass, field
@@ -106,20 +107,43 @@ def _linkedin_company_url(url) -> str | None:
     return url if "linkedin.com/company/" in url else None
 
 
-def fetch_jobspy(settings: Settings, site: str, term: str) -> list[RawJob]:
+class _JobSpyErrors(logging.Handler):
+    """JobSpy logs blocks (429 "use a proxy", "no jobs (blocked?)") instead of raising, and returns fewer jobs."""
+
+    def __init__(self):
+        super().__init__(logging.ERROR)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage()[:200])
+
+
+def fetch_jobspy(settings: Settings, site: str, term: str, problems: list[str] | None = None) -> list[RawJob]:
+    """`problems` collects what the site reported even when some jobs still came back."""
     from jobspy import scrape_jobs  # heavy import (pandas), keep it lazy
 
-    df = scrape_jobs(
-        site_name=[site],
-        search_term=term,
-        location=settings.search_location,
-        results_wanted=settings.results_per_search,
-        hours_old=settings.hours_old,
-        country_indeed="India",
-        fetch_description=True,
-        description_format="markdown",
-        verbose=0,
-    )
+    errors = _JobSpyErrors()
+    logging.getLogger("jobspy").addHandler(errors)
+    try:
+        df = scrape_jobs(
+            site_name=[site],
+            search_term=term,
+            location=settings.search_location,
+            results_wanted=settings.results_per_search,
+            hours_old=settings.hours_old,
+            country_indeed="India",
+            fetch_description=True,
+            description_format="markdown",
+            verbose=0,
+        )
+    finally:
+        logging.getLogger("jobspy").removeHandler(errors)
+        if problems is not None:
+            problems.extend(dict.fromkeys(errors.messages))
+    return _jobspy_rows(df, site)
+
+
+def _jobspy_rows(df, site: str) -> list[RawJob]:
     jobs = []
     for row in df.to_dict("records"):
         r = {k: _clean(v) for k, v in row.items()}

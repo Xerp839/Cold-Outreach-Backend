@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db import session_scope
-from app.models import Draft, Job, JobStatus, LinkedInNote, Run
+from app.models import Draft, Event, Job, JobStatus, LinkedInNote, Run
 from app.pipeline import runner
 from app.pipeline.fetch import RawJob
 from app.providers.finders import Apollo, Candidate, Hunter
@@ -76,7 +76,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(s, "job_sites", ["naukri"])
     monkeypatch.setattr(s, "search_terms", ["AI Engineer"])
     monkeypatch.setattr(s, "daily_draft_target", 3)
-    monkeypatch.setattr(runner, "fetch_jobspy", lambda settings, site, term: make_jobs())
+    monkeypatch.setattr(runner, "fetch_jobspy", lambda settings, site, term, problems=None: make_jobs())
     monkeypatch.setattr(runner, "load_ats_companies", lambda: [])
     monkeypatch.setattr(runner, "get_resume_text", lambda url: "RESUME TEXT")
     monkeypatch.setattr(runner, "GmailDrafts", FakeGmail)
@@ -174,6 +174,34 @@ def test_linkedin_notes_for_every_good_fit_company(wired, monkeypatch):
     p2.execute()
     with session_scope() as s:
         assert len(list(s.scalars(select(LinkedInNote)))) == 4  # today's quota already used
+
+
+def test_blocked_source_is_reported(wired, monkeypatch):
+    def fake_fetch(settings, site, term, problems=None):
+        problems.append("response status code 429 (blocked: use a proxy)")
+        return []
+
+    monkeypatch.setattr(wired, "job_sites", ["linkedin"])
+    monkeypatch.setattr(runner, "fetch_jobspy", fake_fetch)
+    monkeypatch.setattr(runner.time, "sleep", lambda s: None)
+    run_id, p = new_run([FakeProvider("gemini")])
+    p.execute()
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+        events = [e.message for e in s.scalars(select(Event).where(Event.run_id == run_id))]
+    assert run.status == "partial" and run.stats["fetched_linkedin"] == 0 and run.stats["blocked_linkedin"] == 1
+    assert any("linkedin: 0 jobs" in m and "blocking this server" in m for m in events)
+    assert any("429" in m for m in events)
+
+
+def test_interrupted_run_is_failed_on_startup(wired):
+    run_id = runner.start_run("cron")
+    runner.log_event(run_id, "score", "info", "scoring")
+    runner.fail_interrupted_runs()
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+    assert run.status == "failed" and "during score" in run.error
+    assert runner.start_run("manual") is not None
 
 
 def test_only_one_run_at_a_time(wired):
