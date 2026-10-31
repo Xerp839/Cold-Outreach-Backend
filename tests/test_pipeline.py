@@ -153,3 +153,24 @@ def test_all_llms_exhausted_leaves_jobs_for_next_run(wired):
 def test_only_one_run_at_a_time(wired):
     assert runner.start_run("manual") is not None
     assert runner.start_run("cron") is None
+
+
+def test_dashboard_endpoints_after_a_run(wired):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    _, p = new_run([FakeProvider("gemini")])
+    p.execute()
+    h = {"X-API-Key": "test-key"}
+    with TestClient(app) as c:
+        drafts = c.get("/drafts?status=drafted", headers=h).json()
+        assert len(drafts) == 3
+        d = drafts[0]
+        assert d["job"]["company"] and d["to_email"] and d["contact_source"] in {"jd", "hunter"}
+        assert c.patch(f"/drafts/{d['id']}", json={"status": "replied"}, headers=h).json()["status"] == "replied"
+        stats = c.get("/stats", headers=h).json()
+        assert stats["drafts_by_status"]["replied"] == 1 and stats["reply_rate"] == 100.0
+        assert stats["jobs_by_status"]["scored"] == 3 and stats["last_run"]["status"] == "success"
+        job_id = c.get("/jobs?status=low_score", headers=h).json()[0]["id"]
+        assert c.patch(f"/jobs/{job_id}", json={"status": "scored"}, headers=h).json()["status"] == "scored"
