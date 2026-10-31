@@ -1,0 +1,51 @@
+name: Daily outreach run
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # 09:00 IST - drafts are waiting when you start your day
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BACKEND_URL: ${{ secrets.BACKEND_URL }}
+      API_KEY: ${{ secrets.API_KEY }}
+    steps:
+      - name: Wake up Render (free instances sleep)
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 30 "$BACKEND_URL/health"; then echo; exit 0; fi
+            echo "not up yet ($i)"; sleep 15
+          done
+          echo "backend never came up"; exit 1
+
+      - name: Start run
+        id: start
+        run: |
+          code=$(curl -sS -o resp.json -w '%{http_code}' -X POST -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs?trigger=cron")
+          cat resp.json; echo
+          if [ "$code" = "409" ]; then echo "a run is already in progress"; exit 0; fi
+          [ "$code" = "202" ] || exit 1
+          echo "run_id=$(jq -r .run_id resp.json)" >> "$GITHUB_OUTPUT"
+
+      # Polling also keeps the free instance awake while the pipeline works.
+      - name: Wait for run to finish
+        if: steps.start.outputs.run_id != ''
+        run: |
+          id=${{ steps.start.outputs.run_id }}
+          for i in $(seq 1 110); do
+            sleep 30
+            status=$(curl -sS --max-time 30 -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs/$id" | jq -r .status || echo unknown)
+            echo "[$i] status=$status"
+            case "$status" in
+              success|partial)
+                curl -sS -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs/$id" | jq '{status, stats}'
+                exit 0 ;;
+              failed)
+                curl -sS -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs/$id" | jq '{status, error, stats}'
+                exit 1 ;;
+            esac
+          done
+          echo "timed out waiting for run"; exit 1
