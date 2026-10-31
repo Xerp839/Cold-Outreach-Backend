@@ -34,10 +34,10 @@ class Settings(BaseSettings):
 
     # --- LLMs ---
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     gemini_rpm: int = 8
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     groq_rpm: int = 25
 
     # --- Contact finders ---
