@@ -85,6 +85,12 @@ class LLMProvider:
                 self.exhausted = True
                 record_usage(self.name, ok=False, exhausted=True, error=resp.text[:500])
                 raise ProviderExhausted(f"{self.name} auth/permission error {resp.status_code}: {resp.text[:300]}")
+            if resp.status_code == 404:
+                # Model retired or misspelled: every later call would fail the same way.
+                self.exhausted = True
+                record_usage(self.name, ok=False, exhausted=True, error=resp.text[:500])
+                raise ProviderExhausted(f"{self.name} model '{self.model}' not found, check the *_MODEL setting: "
+                                        f"{resp.text[:300]}")
             if resp.status_code >= 400:
                 record_usage(self.name, ok=False, error=resp.text[:500])
                 raise ProviderError(f"{self.name} HTTP {resp.status_code}: {resp.text[:300]}")

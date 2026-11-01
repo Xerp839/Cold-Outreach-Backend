@@ -13,7 +13,7 @@ from app.pipeline.resume import drive_download_url
 from app.pipeline.runner import company_key
 from app.pipeline.writer import _validate, build_signature, greeting
 from app.providers.finders import Candidate, Hunter, hunter_daily_share
-from app.providers.llm import ProviderError, parse_json
+from app.providers.llm import GroqProvider, LLMChain, ProviderError, parse_json
 
 DESC = "We are building LLM agents with FastAPI and LangGraph. " * 10
 
@@ -232,3 +232,17 @@ def test_fetch_jobspy_collects_what_the_site_logged(monkeypatch):
     problems = []
     jobs = fetch_jobspy(get_settings(), "linkedin", "AI Engineer", problems)
     assert len(jobs) == 1 and problems == ["response status code 429 (blocked: use a proxy)"]
+
+
+def test_missing_model_disables_provider_for_the_run(monkeypatch):
+    calls = []
+
+    class Resp:
+        status_code, headers, text = 404, {}, '{"error": {"message": "The model does not exist"}}'
+
+    monkeypatch.setattr("app.providers.llm.httpx.post", lambda *a, **kw: calls.append(1) or Resp())
+    monkeypatch.setattr("app.providers.llm.record_usage", lambda *a, **kw: None)
+    chain = LLMChain([GroqProvider("k", "retired-model", 600)])
+    with pytest.raises(Exception, match="retired-model"):
+        chain.complete_json("s", "u")
+    assert not chain.any_available and len(calls) == 1

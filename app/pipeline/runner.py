@@ -184,6 +184,9 @@ class PipelineRun:
     def score_stage(self) -> None:
         cutoff = utcnow() - timedelta(days=self.settings.job_freshness_days)
         with session_scope() as s:
+            # Older versions parked LLM failures as errors, where nothing ever retried them.
+            s.execute(update(Job).where(Job.status == JobStatus.ERROR, Job.status_reason.like("scoring failed%"))
+                      .values(status=JobStatus.NEW))
             ids = list(s.scalars(
                 select(Job.id)
                 .where(Job.status == JobStatus.NEW, Job.fetched_at >= cutoff)
@@ -199,9 +202,9 @@ class PipelineRun:
                 try:
                     result = score_job(self.llm, self.settings, self.resume_text, job)
                 except AllProvidersFailed as e:
-                    if self.llm.any_available:  # this job specifically failed
-                        job.status, job.status_reason = JobStatus.ERROR, f"scoring failed: {str(e)[:500]}"
-                        self.log("score", "warning", f"scoring failed for #{job.id}: {e}", job.id)
+                    # The job stays new so the next run scores it; an error makes this run partial, not success.
+                    job.status_reason = f"scoring failed: {str(e)[:500]}"
+                    self.log("score", "error", f"scoring failed for #{job.id}: {e}", job.id)
                     continue
                 job.score, job.score_details, job.scored_at = result["score"], result, utcnow()
                 if result["score"] >= self.settings.min_score:
@@ -285,7 +288,7 @@ class PipelineRun:
                             self.llm, settings, self.resume_text, job, cand.first_name, cand.title)
                     except (AllProvidersFailed, ProviderError) as e:
                         job.status_reason = f"email writing failed: {str(e)[:300]}"
-                        self.log("draft", "warning", f"writing failed for #{job.id}: {e}", job.id)
+                        self.log("draft", "error", f"writing failed for #{job.id}: {e}", job.id)
                         continue
 
                     msg = build_message(settings.gmail_address, settings.candidate_name, cand.email, cand.name, subject, body)

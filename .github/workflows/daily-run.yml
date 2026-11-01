@@ -24,7 +24,7 @@ jobs:
       - name: Start run
         id: start
         run: |
-          code=$(curl -sS -o resp.json -w '%{http_code}' -X POST -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs?trigger=cron")
+          code=$(curl -sS -o resp.json -w '%{http_code}' -X POST -H "X-API-Key: $API_KEY" "$BACKEND_URL/runs?trigger=${{ github.event_name == 'schedule' && 'cron' || 'manual' }}")
           cat resp.json; echo
           if [ "$code" = "409" ]; then echo "a run is already in progress"; exit 0; fi
           [ "$code" = "202" ] || exit 1

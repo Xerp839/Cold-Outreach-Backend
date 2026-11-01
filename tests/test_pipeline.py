@@ -8,7 +8,7 @@ from app.models import Draft, Event, Job, JobStatus, LinkedInNote, Run
 from app.pipeline import runner
 from app.pipeline.fetch import RawJob
 from app.providers.finders import Apollo, Candidate, Hunter
-from app.providers.llm import ProviderExhausted
+from app.providers.llm import ProviderError, ProviderExhausted
 
 DESC = "Build LLM agents with FastAPI and LangGraph. 1-3 years experience. " * 8
 
@@ -144,6 +144,40 @@ def test_all_llms_exhausted_leaves_jobs_for_next_run(wired):
         new_left = s.scalars(select(Job).where(Job.status == JobStatus.NEW)).all()
     assert run.status == "partial"
     assert len(new_left) >= 3
+
+
+class ScoringBroken(FakeProvider):
+    def complete_json(self, system, user):
+        if '"score"' in system:
+            raise ProviderError(f"{self.name} bad response")
+        return super().complete_json(system, user)
+
+
+def test_scoring_failures_make_the_run_partial_and_retry_next_run(wired):
+    run_id, p = new_run([ScoringBroken("gemini")])
+    p.execute()
+    with session_scope() as s:
+        run = s.get(Run, run_id)
+        statuses = {j.status for j in s.scalars(select(Job).where(Job.status != JobStatus.FILTERED_OUT))}
+    assert run.status == "partial" and run.stats.get("scored", 0) == 0
+    assert statuses == {JobStatus.NEW}
+
+    run_id, p = new_run([FakeProvider("gemini")])
+    p.execute()
+    with session_scope() as s:
+        assert s.get(Run, run_id).stats["scored"] >= 5
+
+
+def test_jobs_errored_by_old_scoring_are_requeued(wired):
+    _, p = new_run([FakeProvider("gemini")])
+    p.fetch_stage()
+    with session_scope() as s:
+        for job in s.scalars(select(Job).where(Job.status == JobStatus.NEW)):
+            job.status, job.status_reason = JobStatus.ERROR, "scoring failed: gemini HTTP 404"
+    p.score_stage()
+    with session_scope() as s:
+        assert not s.scalars(select(Job).where(Job.status == JobStatus.ERROR)).all()
+    assert p.stats["scored"] >= 5
 
 
 def test_jobs_wait_for_tomorrow_when_hunter_share_is_spent(wired, monkeypatch):
