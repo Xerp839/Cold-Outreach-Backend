@@ -2,7 +2,7 @@ name: Daily outreach run
 
 on:
   schedule:
-    - cron: "30 3 * * *" # 09:00 IST - drafts are waiting when you start your day
+    - cron: "17 0 * * *" # 05:47 IST; odd minute because GitHub delays or drops jobs at busy :00/:30
   workflow_dispatch: {}
 
 jobs:

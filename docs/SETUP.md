@@ -14,7 +14,7 @@ Do the sections in order: each one produces a value that goes into `.env` (and l
 | 7 | Your machine | `.env`, first real run | - |
 | 8 | Render | Backend URL | GitHub secret `BACKEND_URL`, Vercel `VITE_API_URL` |
 | 9 | Vercel | Dashboard URL | Render `FRONTEND_ORIGINS` |
-| 10 | GitHub | Daily 09:00 IST cron | - |
+| 10 | GitHub | Daily 05:47 IST cron | - |
 
 Only `DATABASE_URL`, `API_KEY`, `CANDIDATE_NAME`, `RESUME_URL`, `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD` and at least
 one LLM key are required. Without Apollo/Hunter keys the pipeline still drafts to emails printed in job posts, and
@@ -177,7 +177,7 @@ If the dashboard says "Can't reach backend", it's almost always `FRONTEND_ORIGIN
 
 ## 10. GitHub Actions (daily cron)
 
-The workflow `.github/workflows/daily-run.yml` runs at **09:00 IST** daily: it wakes Render, calls `POST /runs`,
+The workflow `.github/workflows/daily-run.yml` runs at **05:47 IST** daily: it wakes Render, calls `POST /runs`,
 and polls until the run finishes (the polling also keeps the free instance awake).
 
 1. GitHub -> `Cold-Outreach-Backend` -> **Settings** -> **Secrets and variables** -> **Actions** ->

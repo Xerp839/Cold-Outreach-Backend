@@ -4,7 +4,7 @@ Personal job-switch assistant. Every morning it finds fresh jobs in India, keeps
 finds one person to write to, and puts a personalised email in my **Gmail Drafts**. I review and send them by hand.
 
 ```
-GitHub Actions cron (09:00 IST)
+GitHub Actions cron (05:47 IST)
   -> POST /runs on Render
      1. fetch      LinkedIn, Naukri, Indeed (JobSpy) + optional Greenhouse/Lever/Ashby boards
      2. filter     free rules: title, years asked, salary, location, blocklist, dedupe
